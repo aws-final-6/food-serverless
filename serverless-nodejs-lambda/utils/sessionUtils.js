@@ -2,10 +2,8 @@ const mysql = require("mysql2/promise");
 const AWS = require("aws-sdk");
 
 const secretsManager = new AWS.SecretsManager();
-
 let dbPassword;
 
-// 비밀번호 가져오기 함수
 async function getDatabaseCredentials() {
   if (dbPassword) {
     return dbPassword;
@@ -25,14 +23,13 @@ async function getDatabaseCredentials() {
   }
 }
 
-// 데이터베이스 연결 설정 (이 설정은 handler.js와 동일하게 해야 함)
-async function getDatabasePool() {
-  const dbPassword = await getDatabaseCredentials();
+async function createPool() {
+  const password = await getDatabaseCredentials();
 
   return mysql.createPool({
     host: process.env.DB_HOST,
     user: process.env.DB_USER,
-    password: dbPassword,
+    password: password,
     database: process.env.DB_NAME,
     waitForConnections: true,
     connectionLimit: 10,
@@ -40,10 +37,17 @@ async function getDatabasePool() {
   });
 }
 
-// Session 테이블에서 user_id와 access_token이 일치하는지 검증
-async function validateSession(user_id, access_token) {
-  const pool = await getDatabasePool();
+async function checkSession(user_id) {
+  const pool = await createPool();
+  const [sessionRows] = await pool.query(
+    "SELECT * FROM Session WHERE user_id = ?",
+    [user_id]
+  );
+  return sessionRows.length;
+}
 
+async function validateSession(user_id, access_token) {
+  const pool = await createPool();
   const [sessionRows] = await pool.query(
     "SELECT * FROM Session WHERE user_id = ? AND access_token = ?",
     [user_id, access_token]
@@ -52,12 +56,12 @@ async function validateSession(user_id, access_token) {
 }
 
 async function deleteSession(user_id) {
-  const pool = await getDatabasePool();
-
+  const pool = await createPool();
   await pool.query("DELETE FROM Session WHERE user_id = ?", [user_id]);
 }
 
 module.exports = {
   validateSession,
   deleteSession,
+  checkSession,
 };
