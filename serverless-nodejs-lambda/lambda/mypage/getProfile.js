@@ -25,7 +25,7 @@ async function getDatabaseCredentials() {
   }
 }
 
-exports.testhandler = async (event) => {
+exports.getProfile = async (event) => {
   infoLog("MYPAGE_01", event.body);
   // 0. user_id 를 받아옴
   const { user_id, access_token } = JSON.parse(event.body);
