@@ -30,6 +30,7 @@ const googleReq = {
 };
 
 let dbPassword;
+let pool;
 
 async function getDatabaseCredentials() {
   if (dbPassword) {
@@ -50,22 +51,25 @@ async function getDatabaseCredentials() {
   }
 }
 
-exports.refreshToken = async (event) => {
-  // AUTH_03 : 토큰재발급
-  const { user_provider, refresh_token } = JSON.parse(event.body);
-  infoLog("AUTH_03", event.body);
-
-  const dbPassword = await getDatabaseCredentials();
-
-  const pool = mysql.createPool({
+async function createPool() {
+  const password = await getDatabaseCredentials();
+  pool = mysql.createPool({
     host: process.env.DB_HOST,
     user: process.env.DB_USER,
-    password: dbPassword,
+    password: password,
     database: process.env.DB_NAME,
     waitForConnections: true,
     connectionLimit: 10,
     queueLimit: 0,
   });
+}
+
+exports.refreshToken = async (event) => {
+  // AUTH_03 : 토큰재발급
+  const { user_provider, refresh_token } = JSON.parse(event.body);
+  infoLog("AUTH_03", event.body);
+
+  if (!pool) await createPool();
 
   // 0-1. 유효한 user_provider 목록
   const validProviders = ["kakao", "naver", "google"];

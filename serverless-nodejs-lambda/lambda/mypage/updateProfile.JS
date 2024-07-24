@@ -1,10 +1,11 @@
 const mysql = require("mysql2/promise");
 const AWS = require("aws-sdk");
-const { validateSession } = require("../../utils/sessionUtils");
+const { validateSession } = require("/opt/nodejs/utils/sessionUtils");
 const { errLog, infoLog, successLog } = require("/opt/nodejs/utils/logUtils");
 const secretsManager = new AWS.SecretsManager();
 
 let dbPassword;
+let pool;
 
 async function getDatabaseCredentials() {
   if (dbPassword) {
@@ -23,6 +24,19 @@ async function getDatabaseCredentials() {
   } else {
     throw new Error("SecretString not found in Secrets Manager response");
   }
+}
+
+async function createPool() {
+  const password = await getDatabaseCredentials();
+  pool = mysql.createPool({
+    host: process.env.DB_HOST,
+    user: process.env.DB_USER,
+    password: password,
+    database: process.env.DB_NAME,
+    waitForConnections: true,
+    connectionLimit: 10,
+    queueLimit: 0,
+  });
 }
 
 exports.updateProfile = async (event) => {
@@ -52,16 +66,7 @@ exports.updateProfile = async (event) => {
   }
 
   try {
-    const dbPassword = await getDatabaseCredentials();
-    const pool = mysql.createPool({
-      host: process.env.DB_HOST,
-      user: process.env.DB_USER,
-      password: dbPassword,
-      database: process.env.DB_NAME,
-      waitForConnections: true,
-      connectionLimit: 10,
-      queueLimit: 0,
-    });
+    if (!pool) await createPool();
 
     // 최종적인 회원 정보 업데이트 던지기
     const connection = await pool.getConnection();

@@ -5,6 +5,7 @@ const { errLog, infoLog, successLog } = require("/opt/nodejs/utils/logUtils");
 const secretsManager = new AWS.SecretsManager();
 
 let dbPassword;
+let pool;
 
 async function getDatabaseCredentials() {
   if (dbPassword) {
@@ -23,6 +24,19 @@ async function getDatabaseCredentials() {
   } else {
     throw new Error("SecretString not found in Secrets Manager response");
   }
+}
+
+async function createPool() {
+  const password = await getDatabaseCredentials();
+  pool = mysql.createPool({
+    host: process.env.DB_HOST,
+    user: process.env.DB_USER,
+    password: password,
+    database: process.env.DB_NAME,
+    waitForConnections: true,
+    connectionLimit: 10,
+    queueLimit: 0,
+  });
 }
 
 exports.getMultiSearchList = async (event) => {
@@ -47,16 +61,7 @@ exports.getMultiSearchList = async (event) => {
   }
 
   try {
-    const dbPassword = await getDatabaseCredentials();
-    const pool = mysql.createPool({
-      host: process.env.DB_HOST,
-      user: process.env.DB_USER,
-      password: dbPassword,
-      database: process.env.DB_NAME,
-      waitForConnections: true,
-      connectionLimit: 10,
-      queueLimit: 0,
-    });
+    if (!pool) await createPool();
 
     // 2. 재료명으로 재료 ID를 검색
     const placeholders = ing_search.map(() => "?").join(", ");

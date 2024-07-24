@@ -4,6 +4,7 @@ const { errLog, infoLog, successLog } = require("/opt/nodejs/utils/logUtils");
 const secretsManager = new AWS.SecretsManager();
 
 let dbPassword;
+let pool;
 
 async function getDatabaseCredentials() {
   if (dbPassword) {
@@ -24,6 +25,19 @@ async function getDatabaseCredentials() {
   }
 }
 
+async function createPool() {
+  const password = await getDatabaseCredentials();
+  pool = mysql.createPool({
+    host: process.env.DB_HOST,
+    user: process.env.DB_USER,
+    password: password,
+    database: process.env.DB_NAME,
+    waitForConnections: true,
+    connectionLimit: 10,
+    queueLimit: 0,
+  });
+}
+
 exports.signup = async (event) => {
   infoLog("AUTH_08", event.body);
   const {
@@ -40,17 +54,7 @@ exports.signup = async (event) => {
   const subscription = Boolean(user_subscription == "true");
 
   try {
-    const dbPassword = await getDatabaseCredentials();
-
-    const pool = mysql.createPool({
-      host: process.env.DB_HOST,
-      user: process.env.DB_USER,
-      password: dbPassword,
-      database: process.env.DB_NAME,
-      waitForConnections: true,
-      connectionLimit: 10,
-      queueLimit: 0,
-    });
+    if (!pool) await createPool();
 
     // 1. 이메일 중복 체크
     const [existingUsers] = await pool.query(
@@ -86,7 +90,7 @@ exports.signup = async (event) => {
     );
     // 3-2. Session 테이블에 user_id, access_token 저장
     await connection.query(
-      "INSERT INTO Session (user_id, access_token) VALUES (?,?)",
+      "INSERT INTO Session (user_id, access_token) VALUES (?, ?)",
       [user_id, access_token]
     );
     // 3-3. MyPage 테이블에 user_id, user_nickname, user_subscription, cate_no, situ_no 저장

@@ -1,4 +1,4 @@
-const axios = require("axios"); // HTTP 요청을 위한 axios 패키지 추가
+const axios = require("axios");
 const {
   validateSession,
   deleteSession,

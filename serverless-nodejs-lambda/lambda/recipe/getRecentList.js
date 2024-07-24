@@ -1,10 +1,11 @@
 const mysql = require("mysql2/promise");
 const AWS = require("aws-sdk");
-const { errLog, infoLog, successLog } = require("../utils/logUtils");
+const { errLog, infoLog, successLog } = require("/opt/nodejs/utils/logUtils");
 
 const secretsManager = new AWS.SecretsManager();
 
 let dbPassword;
+let pool;
 
 async function getDatabaseCredentials() {
   if (dbPassword) {
@@ -25,20 +26,24 @@ async function getDatabaseCredentials() {
   }
 }
 
+async function createPool() {
+  const password = await getDatabaseCredentials();
+  pool = mysql.createPool({
+    host: process.env.DB_HOST,
+    user: process.env.DB_USER,
+    password: password,
+    database: process.env.DB_NAME,
+    waitForConnections: true,
+    connectionLimit: 10,
+    queueLimit: 0,
+  });
+}
+
 exports.getRecentList = async (event) => {
   infoLog("RECIPE_01", event.body);
 
   try {
-    const dbPassword = await getDatabaseCredentials();
-    const pool = mysql.createPool({
-      host: process.env.DB_HOST,
-      user: process.env.DB_USER,
-      password: dbPassword,
-      database: process.env.DB_NAME,
-      waitForConnections: true,
-      connectionLimit: 10,
-      queueLimit: 0,
-    });
+    if (!pool) await createPool();
 
     // 1. recipe_id 기준 20개 SELECT
     const [recentRecipes] = await pool.query(

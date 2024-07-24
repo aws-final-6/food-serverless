@@ -2,6 +2,7 @@ const mysql = require("mysql2/promise");
 const AWS = require("aws-sdk");
 const { validateSession } = require("/opt/nodejs/utils/sessionUtils");
 const { errLog, infoLog, successLog } = require("/opt/nodejs/utils/logUtils");
+
 const secretsManager = new AWS.SecretsManager();
 
 let dbPassword;
@@ -13,7 +14,6 @@ async function getDatabaseCredentials() {
   }
 
   const secretName = process.env.SECRET_NAME;
-
   const data = await secretsManager
     .getSecretValue({ SecretId: secretName })
     .promise();
@@ -39,14 +39,15 @@ async function createPool() {
   });
 }
 
-exports.getProfile = async (event) => {
-  infoLog("MYPAGE_01", event.body);
-  // 0. user_id 를 받아옴
-  const { user_id, access_token } = JSON.parse(event.body);
+exports.getBookmarkList = async (event) => {
+  const body = JSON.parse(event.body);
+  infoLog("BOOKMK_02", body);
+  const { user_id, access_token } = body;
 
+  // 0. Session 테이블에서 user_id와 access_token이 올바르게 짝지어져 있는지 확인
   const isValidSession = await validateSession(user_id, access_token);
   if (!isValidSession) {
-    errLog("MYPAGE_01", 401, "Unauthorized", { user_id: user_id });
+    errLog("BOOKMK_02", 401, "Unauthorized", { user_id: user_id });
     return {
       statusCode: 401,
       headers: {
@@ -59,60 +60,46 @@ exports.getProfile = async (event) => {
     };
   }
 
+  // 1. 입력 데이터 체크
+  if (!user_id) {
+    errLog("BOOKMK_02", 400, "Bad Request", { user_id: user_id });
+    return {
+      statusCode: 400,
+      headers: {
+        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Allow-Credentials": true,
+      },
+      body: JSON.stringify({ message: "잘못된 유저 정보입니다." }),
+    };
+  }
+
   try {
-    if (!pool) await createPool();
-
-    // 1. User 테이블에서 user_id를 키값으로 유저 검색 - user_email
-    const [getUserProfile] = await pool.query(
-      "SELECT user_email FROM User WHERE user_id = ?",
-      [user_id]
-    );
-
-    // 2. MyPage 테이블에서 user_id를 키값으로 유저 검색 - user_nickname, user_subscription, cate_no, situ_no
-    const [getMyPageProfile] = await pool.query(
-      "SELECT user_nickname, user_subscription, cate_no, situ_no FROM MyPage WHERE user_id = ?",
-      [user_id]
-    );
-
-    if (!getUserProfile.length || !getMyPageProfile.length) {
-      errLog("MYPAGE_01", 400, "Bad Request", { user_id: user_id });
-      return {
-        statusCode: 400,
-        headers: {
-          "Access-Control-Allow-Origin": "*",
-          "Access-Control-Allow-Credentials": true,
-        },
-        body: JSON.stringify({ message: "잘못된 유저 정보입니다." }),
-      };
+    if (!pool) {
+      await createPool();
     }
 
-    // 3. 결과값 클라이언트로 보내기 위해 가져오기
-    const user_email = getUserProfile[0].user_email;
-    const user_nickname = getMyPageProfile[0].user_nickname;
-    const user_subscription = getMyPageProfile[0].user_subscription;
-    const user_prefer = getMyPageProfile.map((profile) => ({
-      cate_no: profile.cate_no,
-      situ_no: profile.situ_no,
-    }));
+    // 2. 북마크된 레시피 목록 가져오기
+    const [rows] = await pool.query(
+      `SELECT b.recipe_id, r.recipe_title FROM Bookmark b JOIN Recipe r ON b.recipe_id = r.recipe_id WHERE b.user_id = ?`,
+      [user_id]
+    );
 
-    // 4. 클라이언트로 전달
-    successLog("MYPAGE_01");
+    // 3. 북마크 목록 반환
+    const user_bookmark = rows.map((row) => ({
+      recipe_id: row.recipe_id.toString(),
+      recipe_title: row.recipe_title,
+    }));
+    successLog("BOOKMK_02");
     return {
       statusCode: 200,
       headers: {
         "Access-Control-Allow-Origin": "*",
         "Access-Control-Allow-Credentials": true,
       },
-      body: JSON.stringify({
-        user_id,
-        user_email,
-        user_nickname,
-        user_subscription,
-        user_prefer,
-      }),
+      body: JSON.stringify({ user_bookmark }),
     };
   } catch (err) {
-    errLog("MYPAGE_01", 500, "Internal Server Error", {
+    errLog("BOOKMK_02", 500, "Internal Server Error", {
       user_id: user_id,
       error: err.message,
     });
@@ -123,7 +110,7 @@ exports.getProfile = async (event) => {
         "Access-Control-Allow-Credentials": true,
       },
       body: JSON.stringify({
-        message: "마이페이지 불러오기에 실패했습니다. 다시 시도해주세요.",
+        message: "즐겨찾기 가져오기에 실패했습니다. 다시 시도해주세요.",
       }),
     };
   }

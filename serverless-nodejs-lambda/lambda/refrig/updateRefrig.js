@@ -6,6 +6,7 @@ const { errLog, infoLog, successLog } = require("/opt/nodejs/utils/logUtils");
 const secretsManager = new AWS.SecretsManager();
 
 let dbPassword;
+let pool;
 
 async function getDatabaseCredentials() {
   if (dbPassword) {
@@ -27,17 +28,20 @@ async function getDatabaseCredentials() {
 }
 
 async function createPool() {
-  const password = await getDatabaseCredentials();
+  if (!pool) {
+    const password = await getDatabaseCredentials();
 
-  return mysql.createPool({
-    host: process.env.DB_HOST,
-    user: process.env.DB_USER,
-    password: password,
-    database: process.env.DB_NAME,
-    waitForConnections: true,
-    connectionLimit: 10,
-    queueLimit: 0,
-  });
+    pool = mysql.createPool({
+      host: process.env.DB_HOST,
+      user: process.env.DB_USER,
+      password: password,
+      database: process.env.DB_NAME,
+      waitForConnections: true,
+      connectionLimit: 10,
+      queueLimit: 0,
+    });
+  }
+  return pool;
 }
 
 exports.updateRefrig = async (event) => {
@@ -65,11 +69,10 @@ exports.updateRefrig = async (event) => {
     };
   }
 
-  let pool;
   let connection;
 
   try {
-    pool = await createPool();
+    const pool = await createPool();
     connection = await pool.getConnection();
     await connection.beginTransaction();
 

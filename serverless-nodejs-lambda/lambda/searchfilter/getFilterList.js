@@ -2,6 +2,7 @@ const mysql = require("mysql2/promise");
 const AWS = require("aws-sdk");
 const { validateSession } = require("/opt/nodejs/utils/sessionUtils");
 const { errLog, infoLog, successLog } = require("/opt/nodejs/utils/logUtils");
+
 const secretsManager = new AWS.SecretsManager();
 
 let dbPassword;
@@ -13,7 +14,6 @@ async function getDatabaseCredentials() {
   }
 
   const secretName = process.env.SECRET_NAME;
-
   const data = await secretsManager
     .getSecretValue({ SecretId: secretName })
     .promise();
@@ -39,14 +39,18 @@ async function createPool() {
   });
 }
 
-exports.getProfile = async (event) => {
-  infoLog("MYPAGE_01", event.body);
-  // 0. user_id 를 받아옴
-  const { user_id, access_token } = JSON.parse(event.body);
+exports.getFilterList = async (event) => {
+  const body = JSON.parse(event.body);
+  infoLog("FILTER_01", body);
+  const { user_id, access_token } = body;
 
+  // 0. Session 테이블에서 user_id와 access_token이 올바르게 짝지어져 있는지 확인
   const isValidSession = await validateSession(user_id, access_token);
   if (!isValidSession) {
-    errLog("MYPAGE_01", 401, "Unauthorized", { user_id: user_id });
+    errLog("FILTER_01", 401, "Unauthorized", {
+      user_id: user_id,
+      message: "user_id와 access_token이 일치하지 않습니다.",
+    });
     return {
       statusCode: 401,
       headers: {
@@ -60,59 +64,31 @@ exports.getProfile = async (event) => {
   }
 
   try {
-    if (!pool) await createPool();
-
-    // 1. User 테이블에서 user_id를 키값으로 유저 검색 - user_email
-    const [getUserProfile] = await pool.query(
-      "SELECT user_email FROM User WHERE user_id = ?",
-      [user_id]
-    );
-
-    // 2. MyPage 테이블에서 user_id를 키값으로 유저 검색 - user_nickname, user_subscription, cate_no, situ_no
-    const [getMyPageProfile] = await pool.query(
-      "SELECT user_nickname, user_subscription, cate_no, situ_no FROM MyPage WHERE user_id = ?",
-      [user_id]
-    );
-
-    if (!getUserProfile.length || !getMyPageProfile.length) {
-      errLog("MYPAGE_01", 400, "Bad Request", { user_id: user_id });
-      return {
-        statusCode: 400,
-        headers: {
-          "Access-Control-Allow-Origin": "*",
-          "Access-Control-Allow-Credentials": true,
-        },
-        body: JSON.stringify({ message: "잘못된 유저 정보입니다." }),
-      };
+    // 1. 데이터베이스 풀 생성
+    if (!pool) {
+      await createPool();
     }
 
-    // 3. 결과값 클라이언트로 보내기 위해 가져오기
-    const user_email = getUserProfile[0].user_email;
-    const user_nickname = getMyPageProfile[0].user_nickname;
-    const user_subscription = getMyPageProfile[0].user_subscription;
-    const user_prefer = getMyPageProfile.map((profile) => ({
-      cate_no: profile.cate_no,
-      situ_no: profile.situ_no,
-    }));
+    // 2. SearchFilter에서 user_id로 SELECT
+    const [rows] = await pool.query(
+      "SELECT ingredient_id FROM SearchFilter WHERE user_id = ?",
+      [user_id]
+    );
 
-    // 4. 클라이언트로 전달
-    successLog("MYPAGE_01");
+    // 3. 클라이언트로 반환
+    const filter_list = rows.map((row) => row.ingredient_id);
+
+    successLog("FILTER_01");
     return {
       statusCode: 200,
       headers: {
         "Access-Control-Allow-Origin": "*",
         "Access-Control-Allow-Credentials": true,
       },
-      body: JSON.stringify({
-        user_id,
-        user_email,
-        user_nickname,
-        user_subscription,
-        user_prefer,
-      }),
+      body: JSON.stringify({ filter_list }),
     };
   } catch (err) {
-    errLog("MYPAGE_01", 500, "Internal Server Error", {
+    errLog("FILTER_01", 500, "Internal Server Error", {
       user_id: user_id,
       error: err.message,
     });
@@ -123,7 +99,7 @@ exports.getProfile = async (event) => {
         "Access-Control-Allow-Credentials": true,
       },
       body: JSON.stringify({
-        message: "마이페이지 불러오기에 실패했습니다. 다시 시도해주세요.",
+        message: "검색 필터 목록을 불러오기에 실패했습니다. 다시 시도해주세요.",
       }),
     };
   }

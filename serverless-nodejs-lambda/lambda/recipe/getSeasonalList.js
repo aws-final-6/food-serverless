@@ -1,11 +1,12 @@
 const mysql = require("mysql2/promise");
 const AWS = require("aws-sdk");
 const moment = require("moment-timezone");
-const { errLog, infoLog, successLog } = require("../utils/logUtils");
+const { errLog, infoLog, successLog } = require("/opt/nodejs/utils/logUtils");
 
 const secretsManager = new AWS.SecretsManager();
 
 let dbPassword;
+let pool;
 
 async function getDatabaseCredentials() {
   if (dbPassword) {
@@ -26,20 +27,24 @@ async function getDatabaseCredentials() {
   }
 }
 
+async function createPool() {
+  const password = await getDatabaseCredentials();
+  pool = mysql.createPool({
+    host: process.env.DB_HOST,
+    user: process.env.DB_USER,
+    password: password,
+    database: process.env.DB_NAME,
+    waitForConnections: true,
+    connectionLimit: 10,
+    queueLimit: 0,
+  });
+}
+
 exports.getSeasonalList = async (event) => {
   infoLog("RECIPE_02", event.body);
 
   try {
-    const dbPassword = await getDatabaseCredentials();
-    const pool = mysql.createPool({
-      host: process.env.DB_HOST,
-      user: process.env.DB_USER,
-      password: dbPassword,
-      database: process.env.DB_NAME,
-      waitForConnections: true,
-      connectionLimit: 10,
-      queueLimit: 0,
-    });
+    if (!pool) await createPool();
 
     // 1. 현재 날짜 기준 월 1~12로 가져오기, timezone 고려
     const currentMonth = moment().tz("Asia/Seoul").month() + 1;

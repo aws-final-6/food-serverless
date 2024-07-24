@@ -13,6 +13,7 @@ const bodydata = {
 };
 
 let dbPassword;
+let pool;
 
 async function getDatabaseCredentials() {
   if (dbPassword) {
@@ -31,6 +32,19 @@ async function getDatabaseCredentials() {
   } else {
     throw new Error("SecretString not found in Secrets Manager response");
   }
+}
+
+async function createPool() {
+  const password = await getDatabaseCredentials();
+  pool = mysql.createPool({
+    host: process.env.DB_HOST,
+    user: process.env.DB_USER,
+    password: password,
+    database: process.env.DB_NAME,
+    waitForConnections: true,
+    connectionLimit: 10,
+    queueLimit: 0,
+  });
 }
 
 exports.getRecipe = async (event) => {
@@ -68,16 +82,7 @@ exports.getRecipe = async (event) => {
   }
 
   try {
-    await getDatabaseCredentials();
-    const pool = mysql.createPool({
-      host: process.env.DB_HOST,
-      user: process.env.DB_USER,
-      password: dbPassword,
-      database: process.env.DB_NAME,
-      waitForConnections: true,
-      connectionLimit: 10,
-      queueLimit: 0,
-    });
+    if (!pool) await createPool();
 
     const params = {
       Bucket: bodydata.uri,

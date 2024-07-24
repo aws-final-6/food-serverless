@@ -18,6 +18,7 @@ const naverReq = {
 const front_uri = process.env.FRONT_URI;
 
 let dbPassword;
+let pool;
 
 async function getDatabaseCredentials() {
   if (dbPassword) {
@@ -36,6 +37,19 @@ async function getDatabaseCredentials() {
   } else {
     throw new Error("SecretString not found in Secrets Manager response");
   }
+}
+
+async function createPool() {
+  const password = await getDatabaseCredentials();
+  pool = mysql.createPool({
+    host: process.env.DB_HOST,
+    user: process.env.DB_USER,
+    password: password,
+    database: process.env.DB_NAME,
+    waitForConnections: true,
+    connectionLimit: 10,
+    queueLimit: 0,
+  });
 }
 
 exports.naverRedirect = async (event) => {
@@ -72,17 +86,7 @@ exports.naverRedirect = async (event) => {
     const user_id = String(userInfo.id);
     const user_email = userInfo.email;
 
-    const dbPassword = await getDatabaseCredentials();
-
-    const pool = mysql.createPool({
-      host: process.env.DB_HOST,
-      user: process.env.DB_USER,
-      password: dbPassword,
-      database: process.env.DB_NAME,
-      waitForConnections: true,
-      connectionLimit: 10,
-      queueLimit: 0,
-    });
+    if (!pool) await createPool();
 
     // 2-1. 사용자 정보 중 고유값인 id를 추출하여 User 테이블에 있는지(회원인지) 확인
     const [rows] = await pool.query("SELECT * FROM User WHERE user_id = ?", [
@@ -122,6 +126,7 @@ exports.naverRedirect = async (event) => {
         );
       }
       await connection.commit();
+      connection.release();
       successLog("AUTH_05");
       return {
         statusCode: 200,

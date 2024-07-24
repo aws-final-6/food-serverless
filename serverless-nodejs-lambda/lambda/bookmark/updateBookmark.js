@@ -2,6 +2,7 @@ const mysql = require("mysql2/promise");
 const AWS = require("aws-sdk");
 const { validateSession } = require("/opt/nodejs/utils/sessionUtils");
 const { errLog, infoLog, successLog } = require("/opt/nodejs/utils/logUtils");
+
 const secretsManager = new AWS.SecretsManager();
 
 let dbPassword;
@@ -13,7 +14,6 @@ async function getDatabaseCredentials() {
   }
 
   const secretName = process.env.SECRET_NAME;
-
   const data = await secretsManager
     .getSecretValue({ SecretId: secretName })
     .promise();
@@ -39,14 +39,15 @@ async function createPool() {
   });
 }
 
-exports.getBasicProfile = async (event) => {
-  infoLog("MYPAGE_03", event.body);
-  // 0. user_id 를 받아옴
-  const { user_id, access_token } = JSON.parse(event.body);
+exports.updateBookmark = async (event) => {
+  const body = JSON.parse(event.body);
+  infoLog("BOOKMK_04", body);
+  const { user_id, access_token, recipe_id } = body;
 
+  // 0. Session 테이블에서 user_id와 access_token이 올바르게 짝지어져 있는지 확인
   const isValidSession = await validateSession(user_id, access_token);
   if (!isValidSession) {
-    errLog("MYPAGE_03", 401, "Unauthorized", { user_id: user_id });
+    errLog("BOOKMK_04", 401, "Unauthorized", { user_id: user_id });
     return {
       statusCode: 401,
       headers: {
@@ -59,50 +60,62 @@ exports.getBasicProfile = async (event) => {
     };
   }
 
+  // 1. 입력 데이터 체크
+  if (!user_id || !recipe_id) {
+    errLog("BOOKMK_04", 400, "Bad Request", {
+      user_id: user_id,
+      recipe_id: recipe_id,
+      message: "잘못된 입력 데이터입니다.",
+    });
+    return {
+      statusCode: 400,
+      headers: {
+        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Allow-Credentials": true,
+      },
+      body: JSON.stringify({ message: "잘못된 입력 데이터입니다." }),
+    };
+  }
+
   try {
-    if (!pool) await createPool();
-
-    // 1. MyPage 테이블에서 user_id를 키값으로 유저 검색 - cate_no, situ_no
-    const [getUserProfile] = await pool.query(
-      "SELECT user_nickname, cate_no, situ_no FROM MyPage WHERE user_id = ?",
-      [user_id]
-    );
-
-    if (!getUserProfile.length) {
-      errLog("MYPAGE_03", 400, "Bad Request", { user_id: user_id });
-      return {
-        statusCode: 400,
-        headers: {
-          "Access-Control-Allow-Origin": "*",
-          "Access-Control-Allow-Credentials": true,
-        },
-        body: JSON.stringify({ message: "잘못된 유저 정보입니다." }),
-      };
+    if (!pool) {
+      await createPool();
     }
 
-    // 3. 결과값 클라이언트로 보내기 위해 가져오기
-    const user_nickname = getUserProfile[0].user_nickname;
-    const user_prefer = getUserProfile.map((profile) => ({
-      cate_no: profile.cate_no,
-      situ_no: profile.situ_no,
-    }));
-
-    // 4. 클라이언트로 전달
-    successLog("MYPAGE_03");
+    // 2. 북마크 추가
+    await pool.query(
+      "INSERT INTO Bookmark (user_id, recipe_id) VALUES (?, ?)",
+      [user_id, recipe_id]
+    );
+    successLog("BOOKMK_04");
     return {
       statusCode: 200,
       headers: {
         "Access-Control-Allow-Origin": "*",
         "Access-Control-Allow-Credentials": true,
       },
-      body: JSON.stringify({
-        user_nickname,
-        user_prefer,
-      }),
+      body: JSON.stringify({ message: "북마크가 성공적으로 추가되었습니다." }),
     };
   } catch (err) {
-    errLog("MYPAGE_03", 500, "Internal Server Error", {
+    if (err.code === "ER_DUP_ENTRY") {
+      errLog("BOOKMK_04", 409, "Conflict", {
+        user_id: user_id,
+        recipe_id: recipe_id,
+        message: "이미 북마크에 추가된 레시피입니다.",
+      });
+      return {
+        statusCode: 409,
+        headers: {
+          "Access-Control-Allow-Origin": "*",
+          "Access-Control-Allow-Credentials": true,
+        },
+        body: JSON.stringify({ message: "이미 북마크에 추가된 레시피입니다." }),
+      };
+    }
+
+    errLog("BOOKMK_04", 500, "Internal Server Error", {
       user_id: user_id,
+      recipe_id: recipe_id,
       error: err.message,
     });
     return {
@@ -112,7 +125,7 @@ exports.getBasicProfile = async (event) => {
         "Access-Control-Allow-Credentials": true,
       },
       body: JSON.stringify({
-        message: "마이페이지 불러오기에 실패했습니다. 다시 시도해주세요.",
+        message: "북마크 추가에 실패했습니다. 다시 시도해주세요.",
       }),
     };
   }

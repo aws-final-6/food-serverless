@@ -1,10 +1,11 @@
 const mysql = require("mysql2/promise");
 const AWS = require("aws-sdk");
-const { errLog, infoLog, successLog } = require("../utils/logUtils");
+const { errLog, infoLog, successLog } = require("/opt/nodejs/utils/logUtils");
 
 const secretsManager = new AWS.SecretsManager();
 
 let dbPassword;
+let pool;
 
 async function getDatabaseCredentials() {
   if (dbPassword) {
@@ -23,6 +24,19 @@ async function getDatabaseCredentials() {
   } else {
     throw new Error("SecretString not found in Secrets Manager response");
   }
+}
+
+async function createPool() {
+  const password = await getDatabaseCredentials();
+  pool = mysql.createPool({
+    host: process.env.DB_HOST,
+    user: process.env.DB_USER,
+    password: password,
+    database: process.env.DB_NAME,
+    waitForConnections: true,
+    connectionLimit: 10,
+    queueLimit: 0,
+  });
 }
 
 exports.getTitleSearchList = async (event) => {
@@ -62,16 +76,7 @@ exports.getTitleSearchList = async (event) => {
   }
 
   try {
-    const dbPassword = await getDatabaseCredentials();
-    const pool = mysql.createPool({
-      host: process.env.DB_HOST,
-      user: process.env.DB_USER,
-      password: dbPassword,
-      database: process.env.DB_NAME,
-      waitForConnections: true,
-      connectionLimit: 10,
-      queueLimit: 0,
-    });
+    if (!pool) await createPool();
 
     // 1. 제목으로 검색 (대소문자 구분 없이 포함하는 결과)
     let query = `

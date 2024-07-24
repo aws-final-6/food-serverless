@@ -6,6 +6,7 @@ const { errLog, infoLog, successLog } = require("/opt/nodejs/utils/logUtils");
 const secretsManager = new AWS.SecretsManager();
 
 let dbPassword;
+let pool;
 
 async function getDatabaseCredentials() {
   if (dbPassword) {
@@ -13,10 +14,10 @@ async function getDatabaseCredentials() {
   }
 
   const secretName = process.env.SECRET_NAME;
-
   const data = await secretsManager
     .getSecretValue({ SecretId: secretName })
     .promise();
+
   if ("SecretString" in data) {
     const secret = JSON.parse(data.SecretString);
     dbPassword = secret.password;
@@ -24,6 +25,19 @@ async function getDatabaseCredentials() {
   } else {
     throw new Error("SecretString not found in Secrets Manager response");
   }
+}
+
+async function createPool() {
+  const password = await getDatabaseCredentials();
+  pool = mysql.createPool({
+    host: process.env.DB_HOST,
+    user: process.env.DB_USER,
+    password: password,
+    database: process.env.DB_NAME,
+    waitForConnections: true,
+    connectionLimit: 10,
+    queueLimit: 0,
+  });
 }
 
 exports.addIngredient = async (event) => {
@@ -50,16 +64,7 @@ exports.addIngredient = async (event) => {
   let connection;
 
   try {
-    const dbPassword = await getDatabaseCredentials();
-    const pool = mysql.createPool({
-      host: process.env.DB_HOST,
-      user: process.env.DB_USER,
-      password: dbPassword,
-      database: process.env.DB_NAME,
-      waitForConnections: true,
-      connectionLimit: 10,
-      queueLimit: 0,
-    });
+    if (!pool) await createPool();
 
     // 2. 트랜잭션 시작
     connection = await pool.getConnection();
